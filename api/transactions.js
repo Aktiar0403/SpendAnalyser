@@ -12,10 +12,9 @@ export default async function handler(req, res) {
 
     let allMessages = [];
     let nextPageToken = null;
-    const MAX_EMAILS_TO_FETCH = 400; // Safety limit to prevent Vercel timeout
+    const MAX_EMAILS_TO_FETCH = 400; // Optimal balance for Vercel's 10s timeout
 
-    // --- PAGINATION LOOP ---
-    // This keeps asking Google for the "next page" until we have enough history
+    // --- PAGINATION LOOP: Fetching multiple pages to reach 2021 ---
     do {
       const response = await gmail.users.messages.list({
         userId: 'me',
@@ -43,7 +42,6 @@ export default async function handler(req, res) {
       return null;
     };
 
-    // 2. Parse the emails we found
     for (const msg of allMessages) {
       try {
         const details = await gmail.users.messages.get({ userId: 'me', id: msg.id });
@@ -53,23 +51,25 @@ export default async function handler(req, res) {
         const body = Buffer.from(rawData, 'base64').toString('utf-8');
         const $ = cheerio.load(body);
 
-        // --- THE "SILVER BULLET" APP NAME SCRAPER ---
+        // --- IMPROVED SCRAPER FOR 2021-2026 ---
         let appName = "";
         
-        // Strategy A: Play Store link (Works for most apps)
-        const playStoreLink = $("a[href*='details?id=']").first();
-        if (playStoreLink.length) {
-          appName = playStoreLink.text().trim();
-        }
+        // Strategy 1: Link text (Universal for Play Store apps)
+        const playLink = $("a[href*='details?id=']").first().text().trim();
+        
+        // Strategy 2: Table Search (For older order receipts)
+        const tableItem = $("td:contains('Item')").next('td').text().trim() || 
+                          $("td:contains('Description')").next('td').text().trim();
 
-        // Strategy B: Subject Line Fallback (Works for Subscriptions/YouTube)
-        if (!appName || appName.length < 2 || appName.includes("Order")) {
-          const subject = details.data.payload.headers.find(h => h.name === 'Subject')?.value || "";
-          appName = subject.replace(/Your Google Play Order Receipt from/i, "")
-                           .replace(/Google Play Receipt/i, "")
-                           .replace(/₹.*/, "")
-                           .trim();
-        }
+        // Strategy 3: Subject Line Backup (Fixes "Google Play Purchase" label)
+        const subject = details.data.payload.headers.find(h => h.name === 'Subject')?.value || "";
+        const subjectClean = subject
+          .replace(/Your Google Play Order Receipt from /i, "")
+          .replace(/Google Play Receipt: /i, "")
+          .split(" - ")[0]
+          .trim();
+
+        appName = playLink || tableItem || subjectClean || "Google Play Purchase";
 
         const amountMatch = body.match(/₹\s?([0-9,]+\.?\d*)/);
         
@@ -79,9 +79,9 @@ export default async function handler(req, res) {
             transactions.push({
               id: msg.id,
               date: new Date(parseInt(details.data.internalDate)).toLocaleDateString(),
-              rawDate: parseInt(details.data.internalDate),
+              rawDate: parseInt(details.data.internalDate), // Essential for sorting
               amount: cleanAmount,
-              app: appName || "Google Play Purchase"
+              app: appName.substring(0, 60)
             });
           }
         }
