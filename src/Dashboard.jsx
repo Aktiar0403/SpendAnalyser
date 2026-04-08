@@ -7,20 +7,34 @@ export default function Dashboard({ tokens }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetch('/api/transactions', { headers: { tokens: JSON.stringify(tokens) } })
-      .then(res => res.json())
-      .then(json => {
+// src/Dashboard.jsx
+
+// Change your fetch logic to this:
+useEffect(() => {
+  fetch('/api/transactions', { headers: { tokens: JSON.stringify(tokens) } })
+    .then(res => res.json())
+    .then(json => {
+      // Check if json is actually an array before setting state
+      if (Array.isArray(json)) {
         setData(json);
-        setLoading(false);
-        // Sync to Firestore
         json.forEach(tx => {
           setDoc(doc(db, "transactions", tx.id), tx, { merge: true });
         });
-      });
-  }, []);
+      } else {
+        console.error("Backend error:", json.error);
+        setData([]); // Set empty array so .reduce() doesn't fail
+      }
+      setLoading(false);
+    })
+    .catch(err => {
+      console.error("Fetch failed:", err);
+      setData([]);
+      setLoading(false);
+    });
+}, []);
 
-  const total = data.reduce((acc, curr) => acc + curr.amount, 0);
+// Ensure total is calculated safely
+const total = Array.isArray(data) ? data.reduce((acc, curr) => acc + curr.amount, 0) : 0;
 
   if (loading) return <div className="p-10 text-white">Analyzing Receipts...</div>;
 
