@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Add your custom glass-card style here so it's compiled */
+@layer components {
+  .glass-card {
+    @apply bg-slate-900/50 border border-slate-800 backdrop-blur-md rounded-2xl;
+  }
+}
+
 :root {
   color-scheme: dark;
 }
@@ -10,19 +17,4 @@ body {
   @apply bg-[#020617] text-slate-200 antialiased;
   background: radial-gradient(circle at top right, #1e1b4b, #020617);
   min-height: 100vh;
-}
-
-/* Custom scrollbar for that premium feel */
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  @apply bg-slate-950;
-}
-::-webkit-scrollbar-thumb {
-  @apply bg-slate-800 rounded-full hover:bg-slate-700;
-}
-
-.glass-card {
-  @apply bg-slate-900/50 border border-slate-800 backdrop-blur-md rounded-2xl;
 }
