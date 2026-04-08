@@ -20,8 +20,8 @@ export default async function handler(req, res) {
     // 2. Fetch the list of messages
     const response = await gmail.users.messages.list({
       userId: 'me',
-      q: 'from:payments-noreply@google.com "Google Play"',
-      maxResults: 50
+      q: 'from:googleplay-noreply@google.com OR "Google Play Order Receipts"',
+      maxResults:1050
     });
 
     const messages = response.data.messages || [];
