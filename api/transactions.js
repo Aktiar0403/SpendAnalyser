@@ -10,14 +10,26 @@ export default async function handler(req, res) {
     oauth2Client.setCredentials(tokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // BROADENED SEARCH: Includes the old "googleplay-noreply" and "payments-noreply" addresses
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      q: 'from:(googleplay-noreply@google.com OR payments-noreply@google.com) "Google Play"',
-      maxResults: 600 // Increased slightly for 5 years
-    });
+    let allMessages = [];
+    let nextPageToken = null;
+    const MAX_EMAILS_TO_FETCH = 400; // Safety limit to prevent Vercel timeout
 
-    const messages = response.data.messages || [];
+    // --- PAGINATION LOOP ---
+    // This keeps asking Google for the "next page" until we have enough history
+    do {
+      const response = await gmail.users.messages.list({
+        userId: 'me',
+        q: 'from:(googleplay-noreply@google.com OR payments-noreply@google.com) "Google Play"',
+        maxResults: 100,
+        pageToken: nextPageToken
+      });
+
+      if (response.data.messages) {
+        allMessages = allMessages.concat(response.data.messages);
+      }
+      nextPageToken = response.data.nextPageToken;
+    } while (nextPageToken && allMessages.length < MAX_EMAILS_TO_FETCH);
+
     const transactions = [];
 
     const getBody = (payload) => {
@@ -31,7 +43,8 @@ export default async function handler(req, res) {
       return null;
     };
 
-    for (const msg of messages) {
+    // 2. Parse the emails we found
+    for (const msg of allMessages) {
       try {
         const details = await gmail.users.messages.get({ userId: 'me', id: msg.id });
         const rawData = getBody(details.data.payload);
@@ -43,25 +56,21 @@ export default async function handler(req, res) {
         // --- THE "SILVER BULLET" APP NAME SCRAPER ---
         let appName = "";
         
-        // 1. Look for the Play Store link (This is the most reliable across all years)
+        // Strategy A: Play Store link (Works for most apps)
         const playStoreLink = $("a[href*='details?id=']").first();
         if (playStoreLink.length) {
-            appName = playStoreLink.text().trim();
+          appName = playStoreLink.text().trim();
         }
 
-        // 2. Fallback for Subscriptions (often in a bold header or specific table cell)
-        if (!appName || appName.length < 2) {
-            appName = $("td:contains('Description')").next('td').text().trim() || 
-                      $("td:contains('Item')").next('td').text().trim();
+        // Strategy B: Subject Line Fallback (Works for Subscriptions/YouTube)
+        if (!appName || appName.length < 2 || appName.includes("Order")) {
+          const subject = details.data.payload.headers.find(h => h.name === 'Subject')?.value || "";
+          appName = subject.replace(/Your Google Play Order Receipt from/i, "")
+                           .replace(/Google Play Receipt/i, "")
+                           .replace(/₹.*/, "")
+                           .trim();
         }
 
-        // 3. Last resort: Clean the subject line if the body is unreadable
-        if (!appName || appName.length < 2) {
-            const subject = details.data.payload.headers.find(h => h.name === 'Subject')?.value || "";
-            appName = subject.replace(/Your Google Play Order Receipt from/i, "").trim();
-        }
-
-        // --- AMOUNT EXTRACTION (Supports commas and ₹) ---
         const amountMatch = body.match(/₹\s?([0-9,]+\.?\d*)/);
         
         if (amountMatch) {
@@ -70,7 +79,7 @@ export default async function handler(req, res) {
             transactions.push({
               id: msg.id,
               date: new Date(parseInt(details.data.internalDate)).toLocaleDateString(),
-              rawDate: parseInt(details.data.internalDate), // for sorting
+              rawDate: parseInt(details.data.internalDate),
               amount: cleanAmount,
               app: appName || "Google Play Purchase"
             });
