@@ -11,7 +11,7 @@ export default function Dashboard({ tokens }) {
       .then(json => {
         if (Array.isArray(json)) {
           // SORT DATA: Chronological order (Oldest to Newest) for the chart
-          const sortedData = json.sort((a, b) => new Date(a.date) - new Date(b.date));
+          const sorted = json.sort((a, b) => a.rawDate - b.rawDate);
           setData(sortedData);
         }
         setLoading(false);

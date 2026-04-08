@@ -10,11 +10,11 @@ export default async function handler(req, res) {
     oauth2Client.setCredentials(tokens);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // 1. Fetch list (Cap at 500 for timeout safety)
+    // BROADENED SEARCH: Includes the old "googleplay-noreply" and "payments-noreply" addresses
     const response = await gmail.users.messages.list({
       userId: 'me',
-      q: 'from:googleplay-noreply@google.com OR "Google Play Order Receipt"',
-      maxResults: 500 
+      q: 'from:(googleplay-noreply@google.com OR payments-noreply@google.com) "Google Play"',
+      maxResults: 600 // Increased slightly for 5 years
     });
 
     const messages = response.data.messages || [];
@@ -40,24 +40,28 @@ export default async function handler(req, res) {
         const body = Buffer.from(rawData, 'base64').toString('utf-8');
         const $ = cheerio.load(body);
 
-        // --- ENHANCED SCRAPER ---
+        // --- THE "SILVER BULLET" APP NAME SCRAPER ---
         let appName = "";
         
-        // Strategy A: Check for the actual Play Store link text
-        const playLink = $("a[href*='details?id=']").first().text().trim();
-        
-        // Strategy B: Look for specific table cells that usually hold the item name
-        const itemCell = $("td:contains('Item')").next('td').text().trim();
-        
-        // Strategy C: Check for common subscription patterns
-        const subTitle = $("h2").first().text().trim();
+        // 1. Look for the Play Store link (This is the most reliable across all years)
+        const playStoreLink = $("a[href*='details?id=']").first();
+        if (playStoreLink.length) {
+            appName = playStoreLink.text().trim();
+        }
 
-        appName = playLink || itemCell || subTitle || "Google Play Purchase";
-        
-        // Clean up common noise in the app name
-        appName = appName.split(" - ")[0].split(" (")[0].replace(/Order Receipt/i, "").trim();
+        // 2. Fallback for Subscriptions (often in a bold header or specific table cell)
+        if (!appName || appName.length < 2) {
+            appName = $("td:contains('Description')").next('td').text().trim() || 
+                      $("td:contains('Item')").next('td').text().trim();
+        }
 
-        // --- AMOUNT EXTRACTION ---
+        // 3. Last resort: Clean the subject line if the body is unreadable
+        if (!appName || appName.length < 2) {
+            const subject = details.data.payload.headers.find(h => h.name === 'Subject')?.value || "";
+            appName = subject.replace(/Your Google Play Order Receipt from/i, "").trim();
+        }
+
+        // --- AMOUNT EXTRACTION (Supports commas and ₹) ---
         const amountMatch = body.match(/₹\s?([0-9,]+\.?\d*)/);
         
         if (amountMatch) {
@@ -66,13 +70,13 @@ export default async function handler(req, res) {
             transactions.push({
               id: msg.id,
               date: new Date(parseInt(details.data.internalDate)).toLocaleDateString(),
+              rawDate: parseInt(details.data.internalDate), // for sorting
               amount: cleanAmount,
-              app: appName.substring(0, 60)
+              app: appName || "Google Play Purchase"
             });
           }
         }
       } catch (err) {
-        console.error("Skipped msg:", msg.id);
         continue;
       }
     }
