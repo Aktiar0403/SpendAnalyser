@@ -1,12 +1,24 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Login from './Login';
+import Dashboard from './Dashboard';
 
-function App() {
-  return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-      <Login />
-    </div>
-  );
+export default function App() {
+  const [tokens, setTokens] = useState(null);
+
+  useEffect(() => {
+    // Check if we just got redirected back from OAuth
+    const params = new URLSearchParams(window.location.search);
+    const tokenData = params.get('tokens');
+    
+    if (tokenData) {
+      const parsed = JSON.parse(decodeURIComponent(tokenData));
+      setTokens(parsed);
+      // Clean URL
+      window.history.replaceState({}, document.title, "/");
+    }
+  }, []);
+
+  if (!tokens) return <Login />;
+  
+  return <Dashboard tokens={tokens} />;
 }
-
-export default App;
