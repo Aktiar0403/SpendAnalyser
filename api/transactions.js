@@ -18,11 +18,11 @@ export default async function handler(req, res) {
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     
     // 2. Fetch the list of messages
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      q: 'from:googleplay-noreply@google.com OR "Google Play Order Receipts"',
-      maxResults:1050
-    });
+   const response = await gmail.users.messages.list({
+  userId: 'me',
+  q: 'from:googleplay-noreply@google.com OR "Google Play Order Receipt"',
+  maxResults: 5000 // Increased to capture several years of history
+});
 
     const messages = response.data.messages || [];
     const transactions = [];
@@ -46,27 +46,38 @@ export default async function handler(req, res) {
         
         if (!rawData) continue;
 
-        // Use base64url decoding (Gmail specific)
-        const body = Buffer.from(rawData, 'base64').toString('utf-8');
-        const $ = cheerio.load(body);
+       // Inside the for (const msg of messages) loop in api/transactions.js
 
-        // 4. Advanced Parsing Logic
-        // Look for amount: supports ₹ 100, ₹100.00, and 100.00
-        const amountMatch = body.match(/₹\s?([0-9,]+\.?\d*)/);
-        
-        // Look for App Name: usually in the first <span> or within a specific <td>
-        let appName = "Google Play Purchase";
-        
-        // Strategy A: Find the text near "Transaction date"
-        const appCell = $("td:contains('App')").next('td').text().trim();
-        if (appCell) {
-            appName = appCell;
-        } else {
-            // Strategy B: Get the first bold/significant text
-            const firstSpan = $("span").first().text().trim();
-            if (firstSpan && firstSpan.length > 2) appName = firstSpan;
-        }
+const body = Buffer.from(rawData, 'base64').toString('utf-8');
+const $ = cheerio.load(body);
 
+// --- IMPROVED APP NAME EXTRACTION ---
+let appName = "";
+
+// Strategy A: Most common Google Play layout (Inside a link or strong tag)
+appName = $("a[href*='details?id=']").first().text().trim();
+
+// Strategy B: Tablet layout (Inside a specific TD after "Item")
+if (!appName) {
+  appName = $("td:contains('Item')").next('td').text().trim();
+}
+
+// Strategy C: Subscription layout
+if (!appName) {
+  appName = $("td").find("span").filter(function() {
+    return $(this).text().length > 2 && $(this).text().length < 50;
+  }).first().text().trim();
+}
+
+// Fallback if all else fails
+if (!appName || appName.includes("Order Number")) {
+  appName = "Google Play Purchase";
+}
+
+// --- IMPROVED AMOUNT EXTRACTION ---
+// This regex handles ₹1,200.50, ₹ 50, etc.
+const amountMatch = body.match(/₹\s?([0-9,]+\.?\d*)/);
+const cleanAmount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
         if (amountMatch) {
           const cleanAmount = parseFloat(amountMatch[1].replace(/,/g, ''));
           if (!isNaN(cleanAmount)) {
